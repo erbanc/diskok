@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon foreground: a coral disc above a mint pad. Pure geometry. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- mint target pad -->
+    <path
+        android:fillColor="#96CEBC"
+        android:pathData="M34,70 h40 a6,6 0 0 1 6,6 v2 a6,6 0 0 1 -6,6 h-40 a6,6 0 0 1 -6,-6 v-2 a6,6 0 0 1 6,-6 z" />
+
+    <!-- coral ball -->
+    <path
+        android:fillColor="#F7A199"
+        android:pathData="M54,30 m-14,0 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0" />
+</vector>
