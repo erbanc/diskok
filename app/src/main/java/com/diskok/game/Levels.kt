@@ -153,4 +153,27 @@ object Levels {
             ),
             hint = "Last one. Good luck."),
     )
+
+    /**
+     * A quiet philosophical tale about the little ball we steer — one line per
+     * level, continuing the story. Shown in italic, faint, at the bottom edge.
+     */
+    val stories: List<String> = listOf(
+        "Au commencement, la bille ignorait qu'elle pouvait s'élancer.",
+        "Une main invisible lui révéla qu'un ailleurs pouvait être un but.",
+        "Elle apprit qu'un obstacle n'est qu'une raison de viser plus haut.",
+        "Certaines parois, comprit-elle, rendent l'élan au lieu de le briser.",
+        "Entre deux murs, elle fit l'apprentissage des passages étroits.",
+        "Contourner, parfois, vaut mieux que vouloir traverser.",
+        "Allégée, elle douta : est-ce moi qui vole, ou le monde qui me retient moins ?",
+        "Elle découvrit qu'on rejoint souvent un lieu par le détour.",
+        "Ballottée d'un bord à l'autre, elle cessa de craindre les rebonds.",
+        "Le temps aussi, dit-elle, demande à être visé juste.",
+        "Pour entrer, il lui fallut renoncer à choir, et choisir de remonter.",
+        "Une pente bien lue change une chute en envol.",
+        "Rien n'est immobile ; viser, c'est épouser le mouvement.",
+        "Plus le passage se resserre, plus le geste doit s'apaiser.",
+        "Parmi les écueils, elle ne visait plus la cible, mais le trajet.",
+        "Et lorsqu'elle toucha enfin, elle sut que le but n'avait été qu'un prétexte au voyage.",
+    )
 }

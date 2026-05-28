@@ -71,6 +71,10 @@ class Engine(initialLevel: Int) {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
     }
+    private val story = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create(Typeface.SERIF, Typeface.ITALIC)
+        textAlign = Paint.Align.CENTER
+    }
 
     private class Obs(
         val isRect: Boolean,
@@ -475,14 +479,28 @@ class Engine(initialLevel: Int) {
         if (level.hint.isNotEmpty()) {
             c.drawText(level.hint, width / 2f, height * 0.10f, text)
         }
-        val prompt = when (phase) {
-            Phase.AIMING -> "drag to aim · release to launch"
-            Phase.FLYING -> "tap to retry"
+        // Keep the control prompt only where it helps: the first level (to
+        // teach the gesture) and whenever a shot is in flight.
+        val prompt = when {
+            phase == Phase.AIMING && levelIndex == 0 -> "drag to aim · release to launch"
+            phase == Phase.FLYING -> "tap to retry"
             else -> ""
         }
         if (prompt.isNotEmpty()) {
             text.color = withAlpha(theme.ink, 0.55f)
-            c.drawText(prompt, width / 2f, height * 0.94f, text)
+            text.textSize = minDim * 0.035f
+            c.drawText(prompt, width / 2f, height * 0.915f, text)
+        }
+
+        // The quiet tale, one line per level, italic and faint along the bottom.
+        val tale = Levels.stories.getOrElse(levelIndex) { "" }
+        if (tale.isNotEmpty()) {
+            story.color = withAlpha(theme.ink, 0.40f)
+            story.textSize = minDim * 0.034f
+            val maxW = width * 0.92f
+            val w = story.measureText(tale)
+            if (w > maxW) story.textSize = story.textSize * maxW / w
+            c.drawText(tale, width / 2f, height * 0.965f, story)
         }
     }
 
