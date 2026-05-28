@@ -77,12 +77,21 @@ class GameView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            synchronized(engine) { engine.onTap() }
-            performClick()
-            return true
+        val x = event.x; val y = event.y
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN ->
+                synchronized(engine) { engine.onPointerDown(x, y) }
+            MotionEvent.ACTION_MOVE ->
+                synchronized(engine) { engine.onPointerMove(x, y) }
+            MotionEvent.ACTION_UP -> {
+                synchronized(engine) { engine.onPointerUp(x, y) }
+                performClick()
+            }
+            MotionEvent.ACTION_CANCEL ->
+                synchronized(engine) { engine.onPointerUp(x, y) }
+            else -> return super.onTouchEvent(event)
         }
-        return super.onTouchEvent(event)
+        return true
     }
 
     override fun performClick(): Boolean {

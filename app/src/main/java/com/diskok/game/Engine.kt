@@ -20,7 +20,7 @@ import kotlin.random.Random
  */
 class Engine(initialLevel: Int) {
 
-    enum class Phase { AIMING, CHARGING, FLYING, WON, LOST }
+    enum class Phase { AIMING, FLYING, WON, LOST }
 
     // Hooks supplied by the view.
     var saveLevel: (Int) -> Unit = {}
@@ -45,10 +45,13 @@ class Engine(initialLevel: Int) {
     // Target
     private var tx = 0f; private var ty = 0f; private var tr = 0f
 
-    // Aim / charge
-    private var oscPhase = 0f
-    private var lockedAngle = 0f
-    private var power = 0f
+    // Drag-to-aim: press anywhere, drag to pull back from the ball, release to
+    // launch. The launch goes opposite the drag; distance sets the power.
+    private var dragging = false
+    private var dragStartX = 0f; private var dragStartY = 0f
+    private var dragX = 0f; private var dragY = 0f
+    private val maxDrag get() = minDim * 0.42f
+    private val launchThreshold = 0.06f   // min power to actually fire
 
     // Timers
     private var elapsed = 0f          // drives obstacle motion + halo
@@ -108,7 +111,8 @@ class Engine(initialLevel: Int) {
         saveLevel(levelIndex)
 
         phase = Phase.AIMING
-        oscPhase = 0f; power = 0f; elapsed = 0f; outcomeTimer = 0f
+        dragging = false
+        elapsed = 0f; outcomeTimer = 0f
         levelFade = 1f
         particles.clear()
 
@@ -143,37 +147,49 @@ class Engine(initialLevel: Int) {
 
     // MARK: - Input
 
-    fun onTap() {
+    fun onPointerDown(x: Float, y: Float) {
         when (phase) {
             Phase.AIMING -> {
-                lockedAngle = currentAimAngle()
-                phase = Phase.CHARGING
-                oscPhase = 0f
-                haptic(1)
-            }
-            Phase.CHARGING -> {
-                power = currentCharge()
-                haptic(1)
-                launch()
+                dragging = true
+                dragStartX = x; dragStartY = y
+                dragX = x; dragY = y
             }
             Phase.FLYING, Phase.LOST -> resetLevel()  // immediate retry
             Phase.WON -> {}
         }
     }
 
-    private fun launch() {
-        phase = Phase.FLYING
-        val speed = minSpeed + (maxSpeed - minSpeed) * power
-        vx = cos(lockedAngle) * speed
-        vy = -sin(lockedAngle) * speed   // design up -> screen up
+    fun onPointerMove(x: Float, y: Float) {
+        if (phase == Phase.AIMING && dragging) { dragX = x; dragY = y }
     }
 
-    private fun currentAimAngle(): Float =
-        level.aimCenter + (level.aimRange / 2f) * sin(oscPhase)
+    fun onPointerUp(x: Float, y: Float) {
+        if (phase != Phase.AIMING || !dragging) return
+        dragX = x; dragY = y
+        dragging = false
+        val aim = aimVector()
+        if (aim != null && aim.power >= launchThreshold) {
+            haptic(1)
+            launch(aim.dirX, aim.dirY, aim.power)
+        }
+        // Below threshold: treat as a tap that cancels; stay in AIMING.
+    }
 
-    private fun currentCharge(): Float {
-        val frac = (oscPhase / (2f * Math.PI.toFloat())).mod(1f)
-        return 1f - abs(2f * frac - 1f)   // triangle wave 0..1
+    private class Aim(val dirX: Float, val dirY: Float, val power: Float)
+
+    /** Current pull-back aim, or null if the drag is too tiny to matter. */
+    private fun aimVector(): Aim? {
+        val dx = dragX - dragStartX; val dy = dragY - dragStartY
+        val len = hypot(dx, dy)
+        if (len < 1e-3f) return null
+        val power = (len / maxDrag).coerceIn(0f, 1f)
+        return Aim(-dx / len, -dy / len, power)   // launch opposite the drag
+    }
+
+    private fun launch(dirX: Float, dirY: Float, power: Float) {
+        phase = Phase.FLYING
+        val speed = minSpeed + (maxSpeed - minSpeed) * power
+        vx = dirX * speed; vy = dirY * speed
     }
 
     // MARK: - Update
@@ -188,8 +204,7 @@ class Engine(initialLevel: Int) {
         updateParticles(dt)
 
         when (phase) {
-            Phase.AIMING -> oscPhase += level.aimSpeed * dt * 2f * Math.PI.toFloat()
-            Phase.CHARGING -> oscPhase += level.powerSpeed * dt * 2f * Math.PI.toFloat()
+            Phase.AIMING -> { /* waiting for a drag */ }
             Phase.FLYING -> stepBall(dt)
             Phase.WON -> {
                 outcomeTimer += dt
@@ -363,7 +378,7 @@ class Engine(initialLevel: Int) {
         drawTarget(c)
         drawParticles(c)
         drawBall(c)
-        if (phase == Phase.AIMING || phase == Phase.CHARGING) drawAim(c)
+        if (phase == Phase.AIMING && dragging) drawAim(c)
         drawHud(c)
 
         if (levelFade > 0f) {
@@ -420,19 +435,38 @@ class Engine(initialLevel: Int) {
     }
 
     private fun drawAim(c: Canvas) {
-        val angle = if (phase == Phase.AIMING) currentAimAngle() else lockedAngle
-        val pw = if (phase == Phase.AIMING) 0.5f else currentCharge()
-        val len = ballR * 2.2f + (minDim * 0.22f) * pw
-        val ex = bx + cos(angle) * len
-        val ey = by - sin(angle) * len   // design up -> screen up
+        val aim = aimVector() ?: return
+        val speed = minSpeed + (maxSpeed - minSpeed) * aim.power
+        drawTrajectory(c, aim.dirX * speed, aim.dirY * speed)
 
+        // Solid aim line in the launch direction, length scales with power.
+        val len = ballR * 2.2f + (minDim * 0.22f) * aim.power
         paint.color = theme.aim
         paint.strokeCap = Paint.Cap.ROUND
         paint.strokeWidth = max(3f, minDim * 0.012f)
         paint.style = Paint.Style.STROKE
-        c.drawLine(bx, by, ex, ey, paint)
+        c.drawLine(bx, by, bx + aim.dirX * len, by + aim.dirY * len, paint)
         paint.style = Paint.Style.FILL
         c.drawCircle(bx, by, ballR * 0.55f, paint)
+    }
+
+    /** Dotted preview of the shot (gravity only, no bounces) — short on
+     *  purpose so reading ricochets stays part of the skill. */
+    private fun drawTrajectory(c: Canvas, vx0: Float, vy0: Float) {
+        var px = bx; var py = by; var pvx = vx0; var pvy = vy0
+        val step = 0.025f
+        paint.style = Paint.Style.FILL
+        for (i in 0 until 28) {
+            pvy += gravity * step
+            val damp = 1f - 0.10f * step
+            pvx *= damp; pvy *= damp
+            px += pvx * step; py += pvy * step
+            if (px < -50f || px > width + 50f || py > height + 50f) break
+            if (i % 2 == 0) {
+                paint.color = withAlpha(theme.aim, (1f - i / 28f) * 0.5f)
+                c.drawCircle(px, py, ballR * 0.28f, paint)
+            }
+        }
     }
 
     private fun drawHud(c: Canvas) {
@@ -442,8 +476,7 @@ class Engine(initialLevel: Int) {
             c.drawText(level.hint, width / 2f, height * 0.10f, text)
         }
         val prompt = when (phase) {
-            Phase.AIMING -> "tap to set angle"
-            Phase.CHARGING -> "tap to set power"
+            Phase.AIMING -> "drag to aim · release to launch"
             Phase.FLYING -> "tap to retry"
             else -> ""
         }
