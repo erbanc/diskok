@@ -1,12 +1,14 @@
 package com.diskok.game
 
-import kotlin.math.PI
-
 /**
  * All positions and sizes are normalized to the play field (0..1), where
  * (0,0) is bottom-left and (1,1) is top-right (y points up, design-friendly;
- * the engine flips it to Canvas coordinates). This keeps every level
- * resolution-independent across phones.
+ * the engine flips it to Canvas coordinates). x is normalized to the field
+ * width, y to the height. This keeps every level resolution-independent.
+ *
+ * Aiming is free 360° drag-and-release, so difficulty comes from geometry:
+ * tight targets, blockers on the direct line, and pockets that can only be
+ * entered via a ricochet off a bouncy surface.
  */
 
 sealed class ObstacleKind {
@@ -34,152 +36,120 @@ data class Level(
     val targetY: Float,
     val targetRadius: Float = 0.05f,     // normalized to min dim
     val gravityScale: Float = 1f,
-    val aimCenter: Float = (PI / 2).toFloat(),   // straight up
-    val aimRange: Float = (PI * 0.9).toFloat(),  // total sweep
-    val aimSpeed: Float = 1.4f,                  // higher = harder timing
-    val powerSpeed: Float = 1.3f,
     val obstacles: List<Obstacle> = emptyList(),
     val hint: String = "",
 )
 
 object Levels {
-    private val P = PI.toFloat()
+
+    private fun rect(
+        x: Float, y: Float, w: Float, h: Float,
+        bouncy: Boolean = false, rot: Float = 0f,
+        mdx: Float = 0f, mdy: Float = 0f, mdur: Float = 1.6f,
+    ) = Obstacle(ObstacleKind.Rect(w, h), x, y, bouncy, mdx, mdy, mdur, rot)
+
+    private fun circ(x: Float, y: Float, r: Float, bouncy: Boolean = false) =
+        Obstacle(ObstacleKind.Circle(r), x, y, bouncy)
+
+    /** Builds a pocket that only opens downward, so it must be entered by a
+     *  ricochet off the bouncy floor placed beneath it. */
+    private fun downPocket(tx: Float, ty: Float, floorY: Float): List<Obstacle> = listOf(
+        rect(tx, ty + 0.085f, 0.32f, 0.035f),          // roof
+        rect(tx - 0.15f, ty + 0.04f, 0.03f, 0.17f),    // left upper wall
+        rect(tx + 0.15f, ty + 0.04f, 0.03f, 0.17f),    // right upper wall
+        rect(tx, floorY, 0.50f, 0.04f, bouncy = true), // bouncy landing pad
+    )
 
     val all: List<Level> = listOf(
-        // 1 — first contact: gentle, wide, slow.
-        Level(0.5f, 0.18f, 0.5f, 0.80f, targetRadius = 0.075f,
-            aimSpeed = 0.9f, powerSpeed = 0.9f,
-            hint = "Tap for angle, tap for power."),
+        // 1 — warmup: a straight lob.
+        Level(0.5f, 0.16f, 0.5f, 0.80f, targetRadius = 0.08f,
+            hint = "Drag back, release to launch."),
 
-        // 2 — a little off to the side.
-        Level(0.22f, 0.18f, 0.80f, 0.70f, targetRadius = 0.065f,
-            aimCenter = P * 0.42f, aimSpeed = 1.0f, powerSpeed = 1.0f),
+        // 2 — diagonal arc.
+        Level(0.2f, 0.16f, 0.82f, 0.62f, targetRadius = 0.07f),
 
-        // 3 — clear a low wall.
-        Level(0.18f, 0.18f, 0.82f, 0.30f, targetRadius = 0.06f,
-            aimSpeed = 1.1f, powerSpeed = 1.1f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.04f, 0.34f), 0.5f, 0.17f),
-            )),
+        // 3 — arc over a wall.
+        Level(0.16f, 0.16f, 0.84f, 0.26f, targetRadius = 0.06f,
+            obstacles = listOf(rect(0.5f, 0.22f, 0.05f, 0.44f))),
 
-        // 4 — first bouncer: use the ricochet.
-        Level(0.15f, 0.20f, 0.85f, 0.55f, targetRadius = 0.06f,
-            aimSpeed = 1.2f, powerSpeed = 1.15f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.30f, 0.035f), 0.5f, 0.30f, bouncy = true),
-            ),
-            hint = "Orange blocks bounce."),
+        // 4 — meet the bouncer (a direct arc also works).
+        Level(0.15f, 0.18f, 0.85f, 0.55f, targetRadius = 0.07f,
+            obstacles = listOf(rect(0.5f, 0.30f, 0.34f, 0.035f, bouncy = true)),
+            hint = "Orange surfaces bounce."),
 
-        // 5 — narrow gap.
+        // 5 — thread a narrow gap.
         Level(0.5f, 0.15f, 0.5f, 0.85f, targetRadius = 0.055f,
-            aimSpeed = 1.25f, powerSpeed = 1.2f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.30f, 0.035f), 0.18f, 0.55f),
-                Obstacle(ObstacleKind.Rect(0.30f, 0.035f), 0.82f, 0.55f),
+                rect(0.20f, 0.55f, 0.34f, 0.035f),
+                rect(0.80f, 0.55f, 0.34f, 0.035f),
             )),
 
-        // 6 — circular pillar in the middle.
-        Level(0.16f, 0.22f, 0.84f, 0.22f, targetRadius = 0.055f,
-            aimCenter = P * 0.5f, aimRange = P * 0.8f,
-            aimSpeed = 1.3f, powerSpeed = 1.25f,
+        // 6 — dodge a pillar.
+        Level(0.16f, 0.20f, 0.84f, 0.24f, targetRadius = 0.055f,
+            obstacles = listOf(circ(0.5f, 0.32f, 0.11f))),
+
+        // 7 — floaty low gravity, small target.
+        Level(0.18f, 0.20f, 0.82f, 0.78f, targetRadius = 0.05f,
+            gravityScale = 0.55f, hint = "Lighter gravity here."),
+
+        // 8 — bounce bank: a wall blocks the low line, the bouncy floor is the way in.
+        Level(0.14f, 0.55f, 0.86f, 0.30f, targetRadius = 0.055f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Circle(0.10f), 0.5f, 0.30f),
-            )),
+                rect(0.5f, 0.62f, 0.05f, 0.55f),                 // tall divider from the top
+                rect(0.70f, 0.18f, 0.40f, 0.035f, bouncy = true) // bouncy floor on the right
+            ),
+            hint = "Bank off the orange floor."),
 
-        // 7 — low gravity floaty arc.
-        Level(0.18f, 0.20f, 0.82f, 0.78f, targetRadius = 0.055f,
-            gravityScale = 0.55f, aimSpeed = 1.35f, powerSpeed = 1.3f,
-            hint = "Lighter gravity here."),
-
-        // 8 — bounce off a wall to a corner.
-        Level(0.5f, 0.18f, 0.12f, 0.62f, targetRadius = 0.05f,
-            aimSpeed = 1.4f, powerSpeed = 1.35f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.035f, 0.45f), 0.30f, 0.62f, bouncy = true),
-            )),
-
-        // 9 — two bouncers, a corridor.
+        // 9 — corridor of two bouncers.
         Level(0.5f, 0.14f, 0.5f, 0.86f, targetRadius = 0.05f,
-            aimRange = P * 0.6f, aimSpeed = 1.45f, powerSpeed = 1.4f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.035f, 0.5f), 0.30f, 0.5f, bouncy = true),
-                Obstacle(ObstacleKind.Rect(0.035f, 0.5f), 0.70f, 0.5f, bouncy = true),
+                rect(0.26f, 0.5f, 0.035f, 0.5f, bouncy = true),
+                rect(0.74f, 0.5f, 0.035f, 0.5f, bouncy = true),
             )),
 
-        // 10 — a moving block.
+        // 10 — time the moving block.
         Level(0.16f, 0.20f, 0.84f, 0.45f, targetRadius = 0.05f,
-            aimSpeed = 1.4f, powerSpeed = 1.35f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.04f, 0.30f), 0.5f, 0.55f,
-                    moveDy = -0.30f, moveDuration = 1.5f),
+                rect(0.5f, 0.55f, 0.04f, 0.30f, mdy = -0.30f, mdur = 1.5f),
             ),
             hint = "Time the moving block."),
 
-        // 11 — small target, fast timing.
-        Level(0.20f, 0.20f, 0.80f, 0.72f, targetRadius = 0.04f,
-            aimSpeed = 1.6f, powerSpeed = 1.55f),
+        // 11 — FORCED bounce: a down-facing pocket over a bouncy pad.
+        Level(0.20f, 0.20f, 0.62f, 0.52f, targetRadius = 0.05f,
+            obstacles = downPocket(0.62f, 0.52f, 0.26f),
+            hint = "Drop in from below — bounce up into it."),
 
-        // 12 — diagonal bouncer ramp.
+        // 12 — diagonal bouncy ramp bank.
         Level(0.14f, 0.55f, 0.86f, 0.55f, targetRadius = 0.05f,
-            aimCenter = -P * 0.15f, aimRange = P * 0.7f,
-            aimSpeed = 1.5f, powerSpeed = 1.45f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.40f, 0.03f), 0.5f, 0.28f,
-                    bouncy = true, rotationDeg = 18f),
+                rect(0.5f, 0.30f, 0.44f, 0.03f, bouncy = true, rot = 18f),
+                rect(0.5f, 0.78f, 0.55f, 0.035f),   // roof caps the arc, ramp is the way
             )),
 
-        // 13 — pillar gauntlet.
-        Level(0.5f, 0.14f, 0.5f, 0.88f, targetRadius = 0.045f,
-            aimRange = P * 0.5f, aimSpeed = 1.6f, powerSpeed = 1.55f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Circle(0.06f), 0.35f, 0.45f),
-                Obstacle(ObstacleKind.Circle(0.06f), 0.65f, 0.62f),
-            )),
-
-        // 14 — moving bouncer.
+        // 13 — moving bouncer.
         Level(0.16f, 0.22f, 0.84f, 0.62f, targetRadius = 0.045f,
-            aimSpeed = 1.6f, powerSpeed = 1.55f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.22f, 0.03f), 0.5f, 0.40f,
-                    bouncy = true, moveDy = 0.18f, moveDuration = 1.3f),
+                rect(0.5f, 0.40f, 0.24f, 0.03f, bouncy = true, mdy = 0.18f, mdur = 1.3f),
             )),
 
-        // 15 — tight S-curve.
-        Level(0.16f, 0.16f, 0.84f, 0.84f, targetRadius = 0.04f,
-            aimSpeed = 1.7f, powerSpeed = 1.6f,
+        // 14 — FORCED bounce: off-center pocket, tighter pad.
+        Level(0.84f, 0.20f, 0.36f, 0.58f, targetRadius = 0.045f,
+            obstacles = downPocket(0.36f, 0.58f, 0.30f) + listOf(
+                circ(0.62f, 0.32f, 0.06f),          // a pillar to route around
+            ),
+            hint = "Same idea, tighter."),
+
+        // 15 — pillar gauntlet, small target.
+        Level(0.5f, 0.14f, 0.5f, 0.88f, targetRadius = 0.04f,
             obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.40f, 0.03f), 0.30f, 0.40f),
-                Obstacle(ObstacleKind.Rect(0.40f, 0.03f), 0.70f, 0.62f),
+                circ(0.35f, 0.45f, 0.06f),
+                circ(0.65f, 0.62f, 0.06f),
             )),
 
-        // 16 — low gravity, closing blocks.
-        Level(0.5f, 0.14f, 0.5f, 0.84f, targetRadius = 0.04f,
-            gravityScale = 0.6f, aimRange = P * 0.45f,
-            aimSpeed = 1.7f, powerSpeed = 1.65f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.04f, 0.26f), 0.35f, 0.5f,
-                    moveDx = 0.30f, moveDuration = 1.4f),
-                Obstacle(ObstacleKind.Rect(0.04f, 0.26f), 0.65f, 0.5f,
-                    moveDx = -0.30f, moveDuration = 1.4f),
-            )),
-
-        // 17 — double ricochet required.
-        Level(0.14f, 0.20f, 0.14f, 0.78f, targetRadius = 0.04f,
-            aimCenter = P * 0.30f, aimRange = P * 0.6f,
-            aimSpeed = 1.75f, powerSpeed = 1.7f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Rect(0.03f, 0.55f), 0.86f, 0.5f, bouncy = true),
-                Obstacle(ObstacleKind.Rect(0.40f, 0.03f), 0.55f, 0.30f, bouncy = true),
-            )),
-
-        // 18 — finale: small target, fast, busy.
-        Level(0.5f, 0.13f, 0.5f, 0.88f, targetRadius = 0.035f,
-            aimRange = P * 0.5f, aimSpeed = 1.9f, powerSpeed = 1.85f,
-            obstacles = listOf(
-                Obstacle(ObstacleKind.Circle(0.05f), 0.30f, 0.40f),
-                Obstacle(ObstacleKind.Circle(0.05f), 0.70f, 0.40f),
-                Obstacle(ObstacleKind.Rect(0.035f, 0.40f), 0.5f, 0.66f,
-                    bouncy = true, moveDx = 0.18f, moveDuration = 1.2f),
+        // 16 — finale: forced-bounce pocket guarded by a moving bouncer.
+        Level(0.5f, 0.13f, 0.5f, 0.70f, targetRadius = 0.04f,
+            obstacles = downPocket(0.5f, 0.70f, 0.40f) + listOf(
+                rect(0.5f, 0.28f, 0.035f, 0.22f, bouncy = true, mdx = 0.22f, mdur = 1.2f),
             ),
             hint = "Last one. Good luck."),
     )
