@@ -2,10 +2,12 @@
 
 🎯 A physics-based mobile game where you bounce a ball to reach targets — simple, fast levels, satisfying ricochets.
 
-One ball, one target. **Drag to pull back and aim — a dotted arc previews the
-shot — then release to launch.** Watch the ball arc, bounce, and (hopefully)
-kiss the pad. Miss and the level restarts instantly. Pastel, geometric, fluid —
-inspired by the clean minimalism of Philipp Stollenmayer's games.
+One ball, one target. **Drag to pull back and aim — a short stub shows your
+direction and power — then release to launch.** Reading the arc (and the
+bounces) is up to you. Some targets move, some surfaces are deadly, and some
+levels make you fly through rings first. Miss and the level restarts instantly.
+Pastel, geometric, fluid — inspired by the clean minimalism of Philipp
+Stollenmayer's games.
 
 ## Tech
 

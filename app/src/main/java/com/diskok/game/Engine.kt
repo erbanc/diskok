@@ -61,6 +61,18 @@ class Engine(initialLevel: Int) {
     private val obstacles = ArrayList<Obs>()
     private val particles = ArrayList<Particle>()
 
+    // Rings to pass through, in order, before the target counts.
+    private val gates = ArrayList<GateR>()
+    private var gateIndex = 0
+
+    // Moving target.
+    private var targetOX = 0f; private var targetOY = 0f
+    private var targetDX = 0f; private var targetDY = 0f
+    private var targetDur = 1.6f
+
+    // Deadly obstacles share one clearly "hot" color across all themes.
+    private val dangerColor = Color.rgb(224, 104, 104)
+
     // Launch tuning (points/second), resolution independent.
     private val minSpeed get() = height * 0.70f
     private val maxSpeed get() = height * 1.95f
@@ -83,6 +95,7 @@ class Engine(initialLevel: Int) {
         val radius: Float,                // (circle)
         val angle: Float,                 // radians
         val bouncy: Boolean,
+        val deadly: Boolean,
         val originX: Float, val originY: Float,
         val dx: Float, val dy: Float,
         val duration: Float,
@@ -91,6 +104,8 @@ class Engine(initialLevel: Int) {
         var velX = 0f; var velY = 0f
         val restitution get() = if (bouncy) 0.96f else 0.22f
     }
+
+    private class GateR(val x: Float, val y: Float, val r: Float)
 
     private class Particle(
         var x: Float, var y: Float, var vx: Float, var vy: Float,
@@ -119,6 +134,7 @@ class Engine(initialLevel: Int) {
         elapsed = 0f; outcomeTimer = 0f
         levelFade = 1f
         particles.clear()
+        gateIndex = 0
 
         ballR = max(6f, minDim * 0.026f)
         bx = px(level.ballX); by = py(level.ballY)
@@ -126,6 +142,13 @@ class Engine(initialLevel: Int) {
 
         tx = px(level.targetX); ty = py(level.targetY)
         tr = level.targetRadius * minDim
+        targetOX = tx; targetOY = ty
+        targetDX = level.targetMoveDx * width
+        targetDY = -level.targetMoveDy * height   // flip y-up -> y-down
+        targetDur = level.targetMoveDuration
+
+        gates.clear()
+        for (g in level.gates) gates.add(GateR(px(g.x), py(g.y), g.r * minDim))
 
         obstacles.clear()
         for (o in level.obstacles) {
@@ -140,7 +163,7 @@ class Engine(initialLevel: Int) {
             // Design rotation is CCW in y-up; screen y-down flips its sign.
             val ang = Math.toRadians((-o.rotationDeg).toDouble()).toFloat()
             obstacles.add(
-                Obs(isRect, cx, cy, hx, hy, r, ang, o.bouncy,
+                Obs(isRect, cx, cy, hx, hy, r, ang, o.bouncy, o.deadly,
                     cx, cy, dxp, dyp, o.moveDuration)
             )
         }
@@ -205,6 +228,7 @@ class Engine(initialLevel: Int) {
         if (levelFade > 0f) levelFade = max(0f, levelFade - dt * 4f)
 
         updateObstacles(dt)
+        updateTarget()
         updateParticles(dt)
 
         when (phase) {
@@ -237,6 +261,15 @@ class Engine(initialLevel: Int) {
         }
     }
 
+    private fun updateTarget() {
+        if (targetDX == 0f && targetDY == 0f) return
+        val frac = (elapsed / targetDur).mod(2f)
+        val tri = if (frac < 1f) frac else 2f - frac
+        val eased = tri * tri * (3f - 2f * tri)
+        tx = targetOX + targetDX * eased
+        ty = targetOY + targetDY * eased
+    }
+
     private fun stepBall(dt: Float) {
         // Substep to keep fast shots from tunneling through thin bouncers.
         val speed = hypot(vx, vy)
@@ -247,14 +280,25 @@ class Engine(initialLevel: Int) {
             val damp = 1f - 0.10f * h
             vx *= damp; vy *= damp
             bx += vx * h; by += vy * h
-            collide()
+            if (collide()) return        // hit a deadly obstacle
+            updateGates()
             if (checkWin()) return
             if (checkOut()) return
         }
         spawnTrail()
     }
 
-    private fun collide() {
+    private fun updateGates() {
+        if (gateIndex >= gates.size) return
+        val g = gates[gateIndex]
+        if (hypot(bx - g.x, by - g.y) <= ballR + g.r) {
+            gateIndex++
+            haptic(0)
+        }
+    }
+
+    /** Returns true if the ball hit a deadly obstacle (attempt failed). */
+    private fun collide(): Boolean {
         for (o in obstacles) {
             var nX: Float; var nY: Float; var pen: Float
             if (!o.isRect) {
@@ -295,6 +339,13 @@ class Engine(initialLevel: Int) {
                 nY = lnx * sb + lny * cb
             }
 
+            if (o.deadly) {
+                phase = Phase.LOST
+                outcomeTimer = 0f
+                burst(bx, by, dangerColor)
+                return true
+            }
+
             // Positional correction.
             bx += nX * pen; by += nY * pen
 
@@ -313,9 +364,11 @@ class Engine(initialLevel: Int) {
                 haptic(0)
             }
         }
+        return false
     }
 
     private fun checkWin(): Boolean {
+        if (gateIndex < gates.size) return false      // rings first
         if (hypot(bx - tx, by - ty) <= ballR + tr) {
             phase = Phase.WON
             outcomeTimer = 0f
@@ -379,6 +432,7 @@ class Engine(initialLevel: Int) {
 
         drawLevelWatermark(c)
         drawObstacles(c)
+        drawGates(c)
         drawTarget(c)
         drawParticles(c)
         drawBall(c)
@@ -400,7 +454,11 @@ class Engine(initialLevel: Int) {
 
     private fun drawObstacles(c: Canvas) {
         for (o in obstacles) {
-            paint.color = if (o.bouncy) theme.bouncer else theme.obstacle
+            paint.color = when {
+                o.deadly -> dangerColor
+                o.bouncy -> theme.bouncer
+                else -> theme.obstacle
+            }
             if (o.isRect) {
                 c.save()
                 c.translate(o.cx, o.cy)
@@ -414,7 +472,33 @@ class Engine(initialLevel: Int) {
         }
     }
 
+    private fun drawGates(c: Canvas) {
+        if (gates.isEmpty()) return
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = max(2.5f, minDim * 0.01f)
+        for (i in gates.indices) {
+            val g = gates[i]
+            when {
+                i < gateIndex -> paint.color = withAlpha(theme.target, 0.30f) // passed
+                i == gateIndex -> paint.color = withAlpha(theme.aim, 0.95f)    // next
+                else -> paint.color = withAlpha(theme.ink, 0.22f)             // later
+            }
+            c.drawCircle(g.x, g.y, g.r, paint)
+        }
+        paint.style = Paint.Style.FILL
+    }
+
     private fun drawTarget(c: Canvas) {
+        val armed = gateIndex >= gates.size
+        if (!armed) {
+            // Not yet active: a faint hollow ring until the rings are cleared.
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = max(2.5f, minDim * 0.012f)
+            paint.color = withAlpha(theme.target, 0.5f)
+            c.drawCircle(tx, ty, tr, paint)
+            paint.style = Paint.Style.FILL
+            return
+        }
         // Pulsing halo.
         val t = (elapsed * 1.1f).mod(1f)
         val scale = 1f + t * 0.7f
@@ -440,37 +524,28 @@ class Engine(initialLevel: Int) {
 
     private fun drawAim(c: Canvas) {
         val aim = aimVector() ?: return
-        val speed = minSpeed + (maxSpeed - minSpeed) * aim.power
-        drawTrajectory(c, aim.dirX * speed, aim.dirY * speed)
+        // A short aim stub only: direction plus a power-scaled length and a
+        // few fading dots. The full arc is NOT shown — reading it is the skill.
+        val maxLen = ballR * 2.0f + minDim * 0.16f
+        val len = ballR * 1.6f + (maxLen - ballR * 1.6f) * aim.power
+        val ex = bx + aim.dirX * len
+        val ey = by + aim.dirY * len
 
-        // Solid aim line in the launch direction, length scales with power.
-        val len = ballR * 2.2f + (minDim * 0.22f) * aim.power
         paint.color = theme.aim
         paint.strokeCap = Paint.Cap.ROUND
         paint.strokeWidth = max(3f, minDim * 0.012f)
         paint.style = Paint.Style.STROKE
-        c.drawLine(bx, by, bx + aim.dirX * len, by + aim.dirY * len, paint)
+        c.drawLine(bx, by, ex, ey, paint)
         paint.style = Paint.Style.FILL
-        c.drawCircle(bx, by, ballR * 0.55f, paint)
-    }
 
-    /** Dotted preview of the shot (gravity only, no bounces) — short on
-     *  purpose so reading ricochets stays part of the skill. */
-    private fun drawTrajectory(c: Canvas, vx0: Float, vy0: Float) {
-        var px = bx; var py = by; var pvx = vx0; var pvy = vy0
-        val step = 0.025f
-        paint.style = Paint.Style.FILL
-        for (i in 0 until 28) {
-            pvy += gravity * step
-            val damp = 1f - 0.10f * step
-            pvx *= damp; pvy *= damp
-            px += pvx * step; py += pvy * step
-            if (px < -50f || px > width + 50f || py > height + 50f) break
-            if (i % 2 == 0) {
-                paint.color = withAlpha(theme.aim, (1f - i / 28f) * 0.5f)
-                c.drawCircle(px, py, ballR * 0.28f, paint)
-            }
+        // Three small dots continuing the launch direction to read the angle.
+        for (i in 1..3) {
+            val d = len + i * ballR * 1.1f
+            paint.color = withAlpha(theme.aim, 0.45f - i * 0.1f)
+            c.drawCircle(bx + aim.dirX * d, by + aim.dirY * d, ballR * 0.22f, paint)
         }
+        paint.color = theme.aim
+        c.drawCircle(bx, by, ballR * 0.55f, paint)
     }
 
     private fun drawHud(c: Canvas) {
