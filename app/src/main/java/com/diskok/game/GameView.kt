@@ -95,17 +95,21 @@ class GameView @JvmOverloads constructor(
     private fun vibrate(type: Int) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val effect = when (type) {
-                1 -> VibrationEffect.createOneShot(16, 150)   // lock
-                2 -> VibrationEffect.createWaveform(
-                    longArrayOf(0, 14, 40, 22), intArrayOf(0, 120, 0, 200), -1) // win
-                else -> VibrationEffect.createOneShot(8, 60)  // tick
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect = when (type) {
+                    1 -> VibrationEffect.createOneShot(16, 150)   // lock
+                    2 -> VibrationEffect.createWaveform(
+                        longArrayOf(0, 14, 40, 22), intArrayOf(0, 120, 0, 200), -1) // win
+                    else -> VibrationEffect.createOneShot(8, 60)  // tick
+                }
+                v.vibrate(effect)
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(if (type == 0) 8L else 16L)
             }
-            v.vibrate(effect)
-        } else {
-            @Suppress("DEPRECATION")
-            v.vibrate(if (type == 0) 8L else 16L)
+        } catch (_: Exception) {
+            // Haptics are non-essential; never let them crash the game.
         }
     }
 
